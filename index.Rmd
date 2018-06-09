@@ -1,0 +1,106 @@
+---
+title: "Machine Learning Course Project"
+author: "Min Hu"
+date: "June 8, 2018"
+output: html_document
+---
+
+### Introduction
+
+The goal of this project is to build a model from a weight lifting exercise data to predict the manner of exercise the participant was doing. The training data contain data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. There are 1 correct type, and 4 incorrect manners. The model will be used on the test data to predict the manner of exercises.
+
+### Exploratory Data Analysis
+
+The training and testing data were loaded into R-studio. The testing data was set aside. All the exploratory data analysis and model building were performed on the training data. 
+
+The overall training data set have 160 variables. However, many variables have many rows of NA's, empty entries, or "#DIV/0!"(Appendix Figure A), which would be difficult to overcome/remove with preprocess imputation method in the caret package. Therefore, the variables with over 95% NA's, empty, or "#DIV/0!" were removed from the original training data set to generate a cleaner training data.  
+
+The new training data have 60 variables. The first 7 variables are for testing participant information (names, id, date, etc), which are not relevant for model building. The last variable (classe) is the manner of exercise variable, which has 5 levels (Figure 1).
+
+
+```{r Setup, echo=FALSE}
+url1 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv"
+f1 <- file.path(getwd(), "pml_training.csv")
+if (!file.exists("./pml_training.csv")) download.file(url1, f1)
+
+url2 <- "https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv"
+f2 <- file.path(getwd(), "pml_testing.csv")
+if (!file.exists("./pml_testing.csv")) download.file(url2, f2)
+
+trainingAll <- read.csv("pml_training.csv")
+testing <- read.csv("pml_testing.csv")
+
+dim(trainingAll)
+```
+
+```{r Explore2, echo=FALSE}
+
+training <- read.csv("pml_training.csv", na.strings = c("", "NA", "#DIV/0!"))
+na_num <- sapply(training, function(y) sum(is.na(y)))
+training <- training[, -which(na_num/nrow(training)>.95)] ## remove variables with too many NAs
+
+str(training[, c(1:10, 60)])
+
+```
+
+### Model selections
+
+1. Setup: Because there are a lot of data, I split the training data into "training", which will be used to build model, and "validation", which will be used to validate the method. In model building, a 5-fold cross-validation was selected via the trControl parameter in the train function in caret package. To speed up to process, a parallel process was configured using functions in parallel and doparallel packages.
+
+```{r setup, include=FALSE, echo=FALSE}
+library(caret); library(parallel); library(doParallel)
+
+inTraining <- createDataPartition(training$classe, p = .75, list=FALSE)
+training <- training[inTraining,]
+validation <- training[-inTraining,]
+
+cluster <- makeCluster(detectCores() - 1)
+registerDoParallel(cluster)
+fitControl <- trainControl(method = "cv", number = 5, allowParallel = TRUE) ## Setup parallel process and 5-fold cross-validation
+```
+
+2. Train: The Train function in caret package was used to build the 4 different models. The in-sample error (accuracy) from random forest (rf) is >99% (as shown below). The boosting method gave 2nd best accuracy (96%), whereas LDA and naive Bayes gave <80% accuracy (results now shown).
+
+```{r, buildmodel, echo=FALSE, warning=FALSE}
+
+modrf <- train(classe ~ ., method="rf", data=training[, -c(1:7)],verbose=FALSE,trControl = fitControl)
+modboost <- train(classe ~ ., method="gbm",data=training[, -c(1:7)],verbose=FALSE,trControl = fitControl)
+modlda <- train(classe ~ ., method="lda",data=training[, -c(1:7)],verbose=FALSE,trControl = fitControl)
+modnb <- train(classe ~ ., method="nb",data=training[, -c(1:7)],verbose=FALSE,trControl = fitControl)
+
+stopCluster(cluster)
+registerDoSEQ()
+
+confusionMatrix(modrf)
+
+```
+
+3. Model_Comparison: These models were used on the validation data. The accuracy (out of sample errors) were shown below. The random forest gave the highest rating (100%), and boosting is the second best. As expected, the results from lda and naive Bayes are not very good.  
+
+```{r, validation, echo=FALSE, warning=FALSE}
+
+cmrf <- confusionMatrix(validation$classe, predict(modrf, validation))
+cmboost <- confusionMatrix(validation$classe, predict(modboost, validation))
+cmlda <-  confusionMatrix(validation$classe, predict(modlda, validation))
+cmnb <- confusionMatrix(validation$classe, predict(modnb, validation))
+
+model_results <- data.frame("Model"= c("Random Forest", "Boosting", "LDA", "naive Bayes"), "Accuracy"= c(cmrf$overall[1], cmboost$overall[1], cmlda$overall[1], cmnb$overall[1]))
+
+model_results
+
+```
+
+4. In/Out of sample error: Generally, in sample error should be less than out of sample error due to over fitting from training data set. But in this case, the out of sample error is better (0%) than in-sample error (0.8%). I believe that this discrepancy is due to two facts: the extremely good fitting of data to the training model, and there are much more data in the training data set than the validation set. Based on this result, I expect the out of sample error from random forest model (on the testing data) will be very low too.
+
+### Conclusions
+
+The weight lifting data were fitted to different machine learning models. A 5-fold cross-validation and parallel process were used in the model building. Of the 4 different models (rf, boosting, lda, and nb), random forest gave the best accuracy in the traininng data set and validation set. Therefore, the corresponding model was used to predict the testing data set.
+
+<P style="page-break-before: always">
+## Appendix
+
+1. Figure A (summary of overall training data (first 20 vaiables))
+
+```{r, summary, echo = FALSE}
+str(trainingAll[, c(1:20)])
+```
